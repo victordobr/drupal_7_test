@@ -1,0 +1,149 @@
+<?php
+
+/**
+ * Helper for debug
+ * @param mixed $mixed
+ * @param boolean $stop
+ */
+function pa($mixed, $stop = false){
+    $ar = debug_backtrace();
+    $key = pathinfo($ar[0]['file']);
+    $key = $key['basename'] .':'. $ar[0]['line'];
+    $print = array($key => $mixed);
+    echo '<pre>'. print_r($print, 1) .'</pre>';
+    if ($stop == 1) exit();
+}
+
+/**
+ * Implements hook_menu
+ */
+function replacement_author_menu() {
+  $items = array();
+
+  $items['admin/replacement-author'] = array(
+    'title' => t('Replacement of the author'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('replacement_author_form'),
+    'access arguments' => array('access content'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/*
+ * Main form
+ */
+function replacement_author_form() {
+  $form = array();
+  
+  // get users for select options
+  $query = db_select('comment', 'c')
+    ->fields('c', array('uid', 'name'))
+    ->groupBy('uid');
+  $query->addExpression('COUNT(c.uid)', 'count');
+  $query->havingCondition('count', 2, '>');
+  $results = $query->execute()
+    ->fetchAll();
+  
+  // create users options array
+  foreach ($results as $value) {
+    $users_options[$value->uid] = $value->name . '(' . $value->count . ')';
+  }
+
+  // get content types for select options
+  $content_types = node_type_get_types();
+  
+  // create content types options array  
+  foreach ($content_types as $value) {
+    $content_types_options[$value->type] = $value->name;
+  }
+
+  $form['users'] = array(
+    '#type' => 'select',
+    '#title' => t('Select user'),
+    '#options' => $users_options,
+  );
+  $form['content_type'] = array(
+    '#type' => 'select',
+    '#title' => t('Select content type'),
+    '#options' => $content_types_options,
+  );
+  /*
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Submit'),
+    '#ajax' => array(
+      'callback' => 'replacement_author_form_ajax_submit',
+      'wrapper' => 'replacement-author-form',
+      'method' => 'replace',
+      'effect' => 'fade',
+    ),
+  );*/
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Submit'),
+  );
+  return $form;
+}
+
+/**
+ * Ajax callback function.
+ */
+/*
+function replacement_author_form_ajax_submit($form, $form_state) {
+  
+  $uid = $form_state['input']['users'];
+  $content_type = $form_state['input']['content_type'];
+  
+  // update all nodes of selected content type
+  $updated = db_update('node')
+    ->fields(array('uid' => $uid,))
+    ->condition('node.type', $content_type)
+    ->execute();
+  
+  if ($updated) {
+    return 'Update was successful';
+  }
+  else {
+    return 'Failed!';
+  }  
+}*/
+
+/**
+ * Main form submit
+ */
+function replacement_author_form_submit($form, $form_state) {
+  $operations = array();
+  $uid = $form_state['input']['users'];
+  $content_type = $form_state['input']['content_type'];
+  $nids = db_select('node', 'n')
+    ->fields('n', array('nid'))
+    ->condition('n.type', $content_type)
+    ->execute()
+    ->fetchCol();
+
+  while($nids){
+    $nids_part = array_splice($nids,  0, 1);
+    $operations[] = array('replacement_author_nodes_resave', array($nids_part, $uid));
+  }
+  $batch = array(
+    'title' => t('Resave nodes'),
+    'operations' => $operations,
+  );
+  batch_set($batch);
+  batch_process();
+}
+
+/*
+ * Resave nodes
+ */
+function replacement_author_nodes_resave($nids = array(), $uid){
+  foreach ($nids as $nid){
+    if (is_numeric($nid)){
+      $node = node_load($nid);
+      $node->uid = $uid;
+      node_save($node);
+    }
+  }
+}
